@@ -1,0 +1,67 @@
+version: "1.0.0"
+
+asset:
+  id: BTCUSDT
+  field: asset_id
+
+timeframe: 5m
+timezone: UTC
+
+timestamps:
+  open_field: timestamp_open
+  close_field: timestamp_close
+  decision_field: decision_ts
+  decision_basis: candle_close
+
+observation_window:
+  candles: 72
+  minutes: 360
+
+prediction_horizon:
+  candles: 12
+  minutes: 60
+
+target:
+  type: direction
+  return: log
+  threshold: 0.0
+  future_return_field: future_return_1h
+  direction_field: target_direction
+
+ohlcv:
+  fields:
+    - open
+    - high
+    - low
+    - close
+    - volume
+
+features:
+  - ret_5m
+  - ret_15m
+  - ret_1h
+  - ret_3h
+  - vol_1h
+  - vol_6h
+  - range_5m
+  - range_1h
+  - volume_rel_1h
+  - volume_trend
+
+minimum_observations: 72
+
+data_quality:
+  contract_path: configs/dqc_v1.yaml
+  invalid_data_policy: reject
+  missing_values_policy: exclude_row
+  gap_policy: reject_required_window
+  silent_correction: false
+
+split:
+  method: chronological
+  train_fraction: 0.6
+  validation_fraction: 0.2
+  test_fraction: 0.2
+  shuffle: false
+  purge_minutes: 60
+  embargo_minutes: 0

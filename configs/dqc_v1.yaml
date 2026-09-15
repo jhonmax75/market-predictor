@@ -1,0 +1,321 @@
+contract:
+  id: DQC-V1
+  name: "Data Quality Contract - Financial Market Prediction V1"
+  version: "1.0.0"
+  status: ACTIVE
+  purpose: >
+    Define regras objetivas de qualidade, integridade temporal,
+    consistencia OHLCV, causalidade, disponibilidade do target e
+    prevencao de data leakage para o dataset supervisionado V1.
+  dataset:
+    granularity: 5m
+    observation_window:
+      candles: 72
+      duration: 6h
+    prediction_horizon:
+      candles: 12
+      duration: 1h
+    timezone:
+      canonical: UTC
+      naive_timestamps: FAIL
+    primary_key: [asset_id, decision_ts]
+    candle_key: [asset_id, candle_open_ts]
+    feature_columns:
+      - ret_5m
+      - ret_15m
+      - ret_1h
+      - ret_3h
+      - vol_1h
+      - vol_6h
+      - range_5m
+      - range_1h
+      - volume_rel_1h
+      - volume_trend
+    target_columns:
+      - future_return_1h
+      - target_direction
+
+severity:
+  ERROR:
+    description: Violacao estrutural, temporal, numerica ou causal.
+    dataset_effect: FAIL
+  WARNING:
+    description: Anomalia potencialmente legitima, registrada sem exclusao automatica.
+    dataset_effect: PASS_WITH_FLAGS
+  INFO:
+    description: Informacao de auditoria sem impacto na validade.
+    dataset_effect: PASS
+
+rules:
+  DQ-001:
+    name: asset_id obrigatorio
+    severity: ERROR
+    object: asset_id
+    condition: asset_id existe, e string e nao e vazio
+    test: asset_id.notna() AND asset_id.astype(str).str.strip().ne("")
+    action: REJECT_ROW
+  DQ-002:
+    name: decision_ts obrigatorio
+    severity: ERROR
+    object: decision_ts
+    condition: decision_ts existe em todas as observacoes candidatas
+    test: decision_ts.notna()
+    action: REJECT_ROW
+  DQ-003:
+    name: timestamps em UTC
+    severity: ERROR
+    object: timestamps
+    condition: timestamps possuem timezone explicito e estao em UTC
+    test: timestamp.dtype == datetime64[ns, UTC]
+    action: REJECT_ROW
+  DQ-004:
+    name: unicidade da chave primaria
+    severity: ERROR
+    object: [asset_id, decision_ts]
+    condition: combinacao da chave primaria e unica
+    test: duplicated([asset_id, decision_ts]) == False
+    action: REJECT_DUPLICATE
+  DQ-005:
+    name: ordenacao temporal
+    severity: ERROR
+    object: decision_ts
+    condition: decision_ts e estritamente crescente por ativo
+    test: diff(decision_ts).dropna() > 0
+    action: REJECT_INVALID_SEQUENCE
+  DQ-006:
+    name: duplicidade de candle
+    severity: ERROR
+    object: [asset_id, candle_open_ts]
+    condition: chave do candle bruto e unica
+    test: duplicated([asset_id, candle_open_ts]) == False
+    action: REJECT_DUPLICATE_CANDLE
+  DQ-007:
+    name: intervalo do candle
+    severity: ERROR
+    object: [candle_open_ts, candle_close_ts]
+    condition: candle possui duracao de exatamente 5 minutos
+    test: candle_close_ts - candle_open_ts == timedelta(minutes=5)
+    action: REJECT_ROW
+  DQ-008:
+    name: continuidade temporal
+    severity: ERROR
+    object: candle_open_ts
+    condition: candles da janela necessaria estao separados por 5 minutos
+    test: diff(candle_open_ts).dropna() == timedelta(minutes=5)
+    action: EXCLUDE_ROW
+  DQ-009:
+    name: lacuna temporal fora da janela
+    severity: WARNING
+    object: candle_open_ts
+    condition: lacunas fora de janelas candidatas sao registradas
+    test: gap_duration > timedelta(minutes=5)
+    action: FLAG_GAP
+  DQ-010:
+    name: precos positivos
+    severity: ERROR
+    object: [open, high, low, close]
+    condition: todos os precos sao maiores que zero
+    test: (open > 0) AND (high > 0) AND (low > 0) AND (close > 0)
+    action: REJECT_ROW
+  DQ-011:
+    name: consistencia OHLC
+    severity: ERROR
+    object: [open, high, low, close]
+    condition: high >= max(open, close), low <= min(open, close), high >= low
+    test: high >= max(open, close) AND low <= min(open, close) AND high >= low
+    action: REJECT_ROW
+  DQ-012:
+    name: volume nao negativo
+    severity: ERROR
+    object: volume
+    condition: volume e maior ou igual a zero
+    test: volume >= 0
+    action: REJECT_ROW
+  DQ-013:
+    name: volume igual a zero
+    severity: WARNING
+    object: volume
+    condition: volume igual a zero e registrado sem exclusao automatica
+    test: volume == 0
+    action: FLAG_ZERO_VOLUME
+  DQ-014:
+    name: valores OHLCV finitos
+    severity: ERROR
+    object: [open, high, low, close, volume]
+    condition: nenhum valor e NaN, infinito positivo ou infinito negativo
+    test: isfinite(OHLCV).all()
+    action: REJECT_ROW
+  DQ-015:
+    name: features finitas
+    severity: ERROR
+    object: feature_columns
+    condition: todas as features V1 sao finitas
+    test: isfinite(FEATURE_COLUMNS).all()
+    action: REJECT_ROW
+  DQ-016:
+    name: historico minimo
+    severity: ERROR
+    object: observation_window
+    condition: existem pelo menos 72 candles historicos completos
+    test: historical_complete_candles >= 72
+    action: EXCLUDE_ROW
+  DQ-017:
+    name: causalidade das features
+    severity: ERROR
+    object: feature_pipeline
+    condition: features usam apenas dados disponiveis em decision_ts
+    test: feature_data_max_ts <= decision_ts
+    action: FAIL_PIPELINE
+  DQ-018:
+    name: target disponivel
+    severity: ERROR
+    object: target
+    condition: target_ts existe uma hora apos decision_ts e e valido
+    test: target_candle_exists == True AND target_candle_valid == True
+    action: EXCLUDE_ROW
+  DQ-019:
+    name: target temporalmente posterior
+    severity: ERROR
+    object: target_ts
+    condition: target_ts e exatamente uma hora posterior a decision_ts
+    test: target_ts - decision_ts == timedelta(hours=1)
+    action: REJECT_ROW
+  DQ-020:
+    name: future_return_1h finito
+    severity: ERROR
+    object: future_return_1h
+    condition: future_return_1h e numerico e finito
+    test: isfinite(future_return_1h)
+    action: REJECT_ROW
+  DQ-021:
+    name: target_direction consistente
+    severity: ERROR
+    object: target_direction
+    condition: target_direction e 1 quando future_return_1h > 0, senao 0
+    test: target_direction == int8(future_return_1h > 0)
+    action: REJECT_ROW
+  DQ-022:
+    name: target ausente das features
+    severity: ERROR
+    object: feature_schema
+    condition: nenhuma coluna de target pertence ao conjunto de features
+    test: intersection(TARGET_COLUMNS, FEATURE_COLUMNS) == empty_set
+    action: FAIL_PIPELINE
+  DQ-023:
+    name: ausencia de dados futuros nas features
+    severity: ERROR
+    object: feature_pipeline
+    condition: nao existem operacoes future shift, lead ou future window
+    test: feature_data_max_ts <= decision_ts AND no_future_shift_detected
+    action: FAIL_PIPELINE
+  DQ-024:
+    name: scaler ajustado somente no treinamento
+    severity: ERROR
+    object: scaler
+    condition: transformador e ajustado exclusivamente no treino
+    test: scaler.fit_scope == TRAIN_ONLY
+    action: FAIL_PIPELINE
+  DQ-025:
+    name: retorno extremo
+    severity: WARNING
+    object: ret_5m
+    condition: retorno extremo e sinalizado sem exclusao automatica
+    test: abs(ret_5m) > configured_extreme_return_threshold
+    action: FLAG_EXTREME_RETURN
+  DQ-026:
+    name: volume extremo
+    severity: WARNING
+    object: volume
+    condition: volume extremo e sinalizado sem exclusao automatica
+    test: volume > configured_extreme_volume_threshold
+    action: FLAG_EXTREME_VOLUME
+  DQ-027:
+    name: ausencia de NaN nas features finais
+    severity: ERROR
+    object: feature_columns
+    condition: nenhuma feature final possui valor ausente
+    test: FEATURE_COLUMNS.isna().sum() == 0
+    action: REJECT_ROW
+  DQ-028:
+    name: tipos de dados
+    severity: ERROR
+    object: dataframe
+    condition: colunas respeitam os tipos declarados no schema V1
+    test: dataframe.dtypes == declared_schema.dtypes
+    action: FAIL_DATASET
+  DQ-029:
+    name: degeneracao da variavel alvo
+    severity: WARNING
+    object: target_direction
+    condition: classes 0 e 1 estao presentes no dataset supervisionado
+    test: unique(target_direction) == {0, 1}
+    action: FAIL_TRAINING_DATASET
+  DQ-030:
+    name: relatorio de auditoria obrigatorio
+    severity: ERROR
+    object: audit_report
+    condition: cada execucao produz relatorio completo
+    test: audit_report.exists() AND required_audit_fields_present == True
+    action: FAIL_PIPELINE
+
+global_policy:
+  pass:
+    condition: ERROR_COUNT == 0 AND critical_leakage == 0
+    status: PASS
+  pass_with_flags:
+    condition: ERROR_COUNT == 0 AND WARNING_COUNT > 0
+    status: PASS_WITH_FLAGS
+  fail:
+    condition: ERROR_COUNT > 0 OR critical_leakage > 0
+    status: FAIL
+  silent_correction: false
+  missing_data_policy:
+    forward_fill: false
+    backward_fill: false
+    interpolation: false
+    arbitrary_zero_imputation: false
+  anomaly_policy:
+    extreme_return:
+      automatic_exclusion: false
+    extreme_volume:
+      automatic_exclusion: false
+    zero_volume:
+      automatic_exclusion: false
+  leakage_policy:
+    future_features_allowed: false
+    target_in_features_allowed: false
+    global_scaler_fit_allowed: false
+
+audit_report:
+  required: true
+  required_fields:
+    - contract_id
+    - contract_version
+    - dataset_version
+    - execution_timestamp_utc
+    - source
+    - asset_count
+    - raw_rows
+    - valid_rows
+    - excluded_rows
+    - duplicate_count
+    - duplicate_candle_count
+    - gap_count
+    - timezone_errors
+    - invalid_ohlc_count
+    - invalid_volume_count
+    - nan_count
+    - infinite_count
+    - missing_history_count
+    - missing_target_count
+    - causal_violation_count
+    - leakage_violation_count
+    - warning_count
+    - error_count
+    - class_0_count
+    - class_1_count
+    - audit_status
+  status_values:
+    - PASS
+    - PASS_WITH_FLAGS
+    - FAIL

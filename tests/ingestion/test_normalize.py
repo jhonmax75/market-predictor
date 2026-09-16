@@ -39,6 +39,27 @@ def test_normalize_ohlcv_creates_canonical_schema():
     assert deltas.dropna().tolist() == [5.0]
 
 
+def test_normalize_ohlcv_orders_reverse_source_rows_ascending():
+    raw = pd.DataFrame(
+        {
+            "timestamp_open": [
+                pd.Timestamp("2026-09-15 13:05:00", tz="UTC"),
+                pd.Timestamp("2026-09-15 13:00:00", tz="UTC"),
+            ],
+            "open": [101.0, 100.0],
+            "high": [102.0, 101.0],
+            "low": [100.5, 99.5],
+            "close": [101.5, 101.0],
+            "volume": [13.5, 12.5],
+        }
+    )
+
+    normalized = normalize_ohlcv(raw)
+
+    assert normalized["candle_open_ts"].is_monotonic_increasing
+    assert normalized["open"].tolist() == [100.0, 101.0]
+
+
 def test_normalize_ohlcv_preserves_duplicates_and_gaps():
     raw = pd.DataFrame(
         {

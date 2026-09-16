@@ -59,6 +59,11 @@ def normalize_ohlcv(
         "close",
         "volume",
     ]]
+    normalized = normalized.sort_values(
+        "candle_open_ts",
+        kind="stable",
+        ignore_index=True,
+    )
 
     return normalized
 

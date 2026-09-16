@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from market_predictor.ingestion.loader import responses_to_dataframe
 
 
@@ -77,7 +79,7 @@ def test_loader_does_not_fill_missing_rows():
                     "1256.25",
                 ],
                 [
-                    "1757969700000",
+                    "1757970000000",
                     "101.0",
                     "102.0",
                     "100.0",
@@ -92,3 +94,10 @@ def test_loader_does_not_fill_missing_rows():
     dataframe = responses_to_dataframe([response])
 
     assert len(dataframe) == 2
+
+    timestamps = dataframe["timestamp_open"]
+
+    assert timestamps.iloc[1] - timestamps.iloc[0] == pd.Timedelta(minutes=10)
+
+    missing_candle = timestamps.iloc[0] + pd.Timedelta(minutes=5)
+    assert missing_candle not in set(timestamps)

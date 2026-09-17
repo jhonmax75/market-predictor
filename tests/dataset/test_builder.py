@@ -12,7 +12,10 @@ from market_predictor.dataset.builder import build_dataset
 
 DATASET_COLUMNS = [
     "asset_id",
+    "candle_open_ts",
+    "candle_close_ts",
     "decision_ts",
+    "target_ts",
     *FEATURE_COLUMNS,
     *TARGET_COLUMNS,
 ]
@@ -31,6 +34,7 @@ def _make_inputs(rows: int = 4):
         {
             "asset_id": "BTCUSDT",
             "candle_open_ts": index,
+            "candle_close_ts": index + pd.Timedelta(minutes=5),
             "open": close,
             "high": close + 1.0,
             "low": close - 1.0,
@@ -56,13 +60,13 @@ def _make_inputs(rows: int = 4):
     return ohlcv, features, target
 
 
-def test_g8_t01_output_has_exact_14_column_schema():
+def test_g8_t01_output_has_exact_17_column_schema():
     ohlcv, features, target = _make_inputs()
 
     result = build_dataset(ohlcv, features, target)
 
     assert list(result.columns) == DATASET_COLUMNS
-    assert len(result.columns) == 14
+    assert len(result.columns) == 17
 
 
 def test_g8_t02_logical_key_exists():
@@ -84,12 +88,12 @@ def test_g8_t03_logical_key_is_unique():
         build_dataset(ohlcv, features, target)
 
 
-def test_g8_t04_decision_timestamp_equals_candle_open_timestamp():
+def test_g8_t04_decision_timestamp_equals_candle_close_timestamp():
     ohlcv, features, target = _make_inputs()
 
     result = build_dataset(ohlcv, features, target)
 
-    expected = ohlcv.loc[result["decision_ts"], "candle_open_ts"].reset_index(drop=True)
+    expected = result["candle_close_ts"].reset_index(drop=True)
     actual = result["decision_ts"].reset_index(drop=True)
 
     pdt.assert_series_equal(
@@ -99,13 +103,29 @@ def test_g8_t04_decision_timestamp_equals_candle_open_timestamp():
     )
 
 
+def test_s5_temporal_chain_is_explicit():
+    ohlcv, features, target = _make_inputs()
+
+    result = build_dataset(ohlcv, features, target)
+
+    assert (
+        result["candle_close_ts"] - result["candle_open_ts"]
+    ).eq(pd.Timedelta(minutes=5)).all()
+    assert (result["decision_ts"] == result["candle_close_ts"]).all()
+    assert (
+        result["target_ts"] - result["decision_ts"]
+    ).eq(pd.Timedelta(hours=1)).all()
+    assert (result["target_ts"] > result["decision_ts"]).all()
+
+
 def test_g8_t05_features_are_aligned_to_same_t():
     ohlcv, features, target = _make_inputs()
     features.loc[features.index[1], "ret_5m"] = 999.0
 
     result = build_dataset(ohlcv, features, target)
 
-    assert result.loc[result["decision_ts"] == ohlcv.index[1], "ret_5m"].iloc[0] == 999.0
+    decision = ohlcv.loc[ohlcv.index[1], "candle_close_ts"]
+    assert result.loc[result["decision_ts"] == decision, "ret_5m"].iloc[0] == 999.0
 
 
 def test_g8_t06_target_is_aligned_to_same_t():
@@ -114,7 +134,8 @@ def test_g8_t06_target_is_aligned_to_same_t():
 
     result = build_dataset(ohlcv, features, target)
 
-    assert result.loc[result["decision_ts"] == target.index[1], "future_return_1h"].iloc[0] == 0.77
+    decision = ohlcv.loc[target.index[1], "candle_close_ts"]
+    assert result.loc[result["decision_ts"] == decision, "future_return_1h"].iloc[0] == 0.77
 
 
 def test_g8_t07_builder_does_not_shift_target():
@@ -132,7 +153,7 @@ def test_g8_t08_builder_does_not_create_future_features():
 
     result = build_dataset(ohlcv, features, target)
 
-    assert list(result.columns[2:12]) == FEATURE_COLUMNS
+    assert list(result.columns[5:15]) == FEATURE_COLUMNS
     pdt.assert_frame_equal(features, original_features)
 
 
@@ -143,7 +164,7 @@ def test_g8_t09_nan_feature_excludes_decision():
 
     result = build_dataset(ohlcv, features, target)
 
-    assert invalid_index not in set(result["decision_ts"])
+    assert ohlcv.loc[invalid_index, "candle_close_ts"] not in set(result["decision_ts"])
 
 
 def test_g8_t10_nan_target_excludes_decision():
@@ -153,7 +174,7 @@ def test_g8_t10_nan_target_excludes_decision():
 
     result = build_dataset(ohlcv, features, target)
 
-    assert invalid_index not in set(result["decision_ts"])
+    assert ohlcv.loc[invalid_index, "candle_close_ts"] not in set(result["decision_ts"])
 
 
 def test_g8_t11_infinite_values_are_excluded():
@@ -165,8 +186,8 @@ def test_g8_t11_infinite_values_are_excluded():
     result = build_dataset(ohlcv, features, target)
 
     assert np.isfinite(result.select_dtypes(include=[np.number]).to_numpy()).all()
-    assert invalid_index not in set(result["decision_ts"])
-    assert target.index[2] not in set(result["decision_ts"])
+    assert ohlcv.loc[invalid_index, "candle_close_ts"] not in set(result["decision_ts"])
+    assert ohlcv.loc[target.index[2], "candle_close_ts"] not in set(result["decision_ts"])
 
 
 def test_g8_t12_final_dataset_contains_no_nan():
@@ -226,7 +247,10 @@ def test_g8_t17_output_is_valid_intersection():
 
     result = build_dataset(ohlcv, features, target)
 
-    assert list(result["decision_ts"]) == [ohlcv.index[0], ohlcv.index[3]]
+    assert list(result["decision_ts"]) == [
+        ohlcv.loc[ohlcv.index[0], "candle_close_ts"],
+        ohlcv.loc[ohlcv.index[3], "candle_close_ts"],
+    ]
 
 
 def test_g8_t18_missing_required_columns_raise():
@@ -270,7 +294,8 @@ def test_g8_t22_identity_temporal_alignment_uses_target_at_t():
     target.loc[ohlcv.index[2], "future_return_1h"] = 333.0
 
     result = build_dataset(ohlcv, features, target)
-    row = result.loc[result["decision_ts"] == t].iloc[0]
+    decision = ohlcv.loc[t, "candle_close_ts"]
+    row = result.loc[result["decision_ts"] == decision].iloc[0]
 
     assert row["ret_5m"] == 111.0
     assert row["future_return_1h"] == 222.0

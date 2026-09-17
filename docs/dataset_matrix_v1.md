@@ -22,6 +22,7 @@ A entrada deve fornecer, no minimo:
 ```text
 asset_id
 candle_open_ts
+candle_close_ts
 ```
 
 A chave logica da decisao e:
@@ -33,7 +34,7 @@ A chave logica da decisao e:
 Sem criar um novo instante temporal:
 
 ```text
-decision_ts = candle_open_ts
+decision_ts = candle_close_ts
 ```
 
 Uma chamada de `build_dataset()` representa exatamente um `asset_id`. Todos os registros OHLCV da chamada devem possuir o mesmo ativo; qualquer conflito produz erro explicito. Features e target sao alinhados ao ativo e ao indice temporal fornecidos pelo OHLCV.
@@ -64,11 +65,14 @@ Features e target devem estar alinhados pela mesma decisao `t`. O Builder nao po
 
 ## Saida
 
-A saida deve conter exatamente estas 14 colunas, nesta ordem:
+A saida deve conter exatamente estas 17 colunas, nesta ordem:
 
 ```text
 asset_id
+candle_open_ts
+candle_close_ts
 decision_ts
+target_ts
 ret_5m
 ret_15m
 ret_1h
@@ -87,7 +91,9 @@ Cada linha representa uma decisao unica `(asset_id, decision_ts)`.
 
 ## Regras de composicao
 
-- `decision_ts` e uma renomeacao semantica de `candle_open_ts`, sem deslocamento temporal;
+- `candle_close_ts` e derivado de `candle_open_ts + 5min` pela normalizacao;
+- `decision_ts` e igual a `candle_close_ts`;
+- `target_ts` e igual a `decision_ts + 1h`;
 - nenhuma feature e calculada novamente;
 - nenhum target e calculado novamente;
 - o target nao e deslocado pelo Builder;
@@ -131,10 +137,10 @@ write_dataset(...)
 
 | ID | Propriedade | Criterio |
 |---|---|---|
-| G8-T01 | schema final | exatamente 14 colunas na ordem normativa |
+| G8-T01 | schema final | exatamente 17 colunas na ordem normativa |
 | G8-T02 | chave logica | `(asset_id, decision_ts)` existe |
 | G8-T03 | unicidade | nenhuma chave duplicada |
-| G8-T04 | identidade temporal | `decision_ts == candle_open_ts` |
+| G8-T04 | identidade temporal | `decision_ts == candle_close_ts` |
 | G8-T05 | alinhamento de features | features pertencem ao mesmo `t` |
 | G8-T06 | alinhamento de target | target pertence ao mesmo `t` |
 | G8-T07 | target futuro | Builder nao desloca target |
@@ -197,8 +203,9 @@ deduplicacao silenciosa
 
 O Gate 8 sera aprovado somente quando:
 
-- o Builder produzir exatamente as 14 colunas normativas;
-- `decision_ts` preservar `candle_open_ts`;
+- o Builder produzir exatamente as 17 colunas normativas;
+- `decision_ts` ser igual a `candle_close_ts`;
+- `target_ts` ser igual a `decision_ts + 1h`;
 - features e target estiverem alinhados na mesma decisao;
 - duplicidades causarem erro explicito;
 - linhas invalidas forem excluidas sem imputacao;

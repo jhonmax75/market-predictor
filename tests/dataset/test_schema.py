@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from market_predictor.dataset.schema import (
+    CANONICAL_OHLCV_COLUMNS,
     canonical_ohlcv_schema,
     validate_ohlcv_contract,
 )
@@ -19,6 +20,21 @@ def test_canonical_schema_has_expected_columns():
         "close",
         "volume",
     ]
+
+
+def test_canonical_ohlcv_schema_does_not_include_derived_temporal_fields():
+    assert CANONICAL_OHLCV_COLUMNS == [
+        "asset_id",
+        "candle_open_ts",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    ]
+    assert "candle_close_ts" not in CANONICAL_OHLCV_COLUMNS
+    assert "decision_ts" not in CANONICAL_OHLCV_COLUMNS
+    assert "target_ts" not in CANONICAL_OHLCV_COLUMNS
 
 
 def _make_valid_dataframe() -> pd.DataFrame:

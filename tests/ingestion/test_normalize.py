@@ -25,6 +25,7 @@ def test_normalize_ohlcv_creates_canonical_schema():
     assert list(normalized.columns) == [
         "asset_id",
         "candle_open_ts",
+        "candle_close_ts",
         "open",
         "high",
         "low",
@@ -33,10 +34,32 @@ def test_normalize_ohlcv_creates_canonical_schema():
     ]
     assert normalized["asset_id"].tolist() == ["BTCUSDT", "BTCUSDT"]
     assert str(normalized["candle_open_ts"].dt.tz) == "UTC"
+    assert (normalized["candle_close_ts"] - normalized["candle_open_ts"]).eq(pd.Timedelta(minutes=5)).all()
     assert normalized["candle_open_ts"].is_monotonic_increasing
 
     deltas = expected_step_interval(normalized)
     assert deltas.dropna().tolist() == [5.0]
+
+
+def test_normalize_ohlcv_materializes_close_from_open_only():
+    opening = pd.to_datetime(["2026-09-15 10:00:00"], utc=True)
+    raw = pd.DataFrame(
+        {
+            "timestamp_open": opening,
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [10.0],
+        }
+    )
+
+    normalized = normalize_ohlcv(raw)
+
+    assert normalized.loc[0, "candle_close_ts"] == pd.Timestamp(
+        "2026-09-15 10:05:00",
+        tz="UTC",
+    )
 
 
 def test_normalize_ohlcv_orders_reverse_source_rows_ascending():

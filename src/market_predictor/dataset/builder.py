@@ -7,11 +7,15 @@ import pandas as pd
 
 from market_predictor.features.technical import FEATURE_COLUMNS
 from market_predictor.targets.direction import TARGET_COLUMNS
+from market_predictor.dataset.schema import EXPECTED_TIMEFRAME_MINUTES
 
 
 DATASET_COLUMNS = [
 	"asset_id",
+	"candle_open_ts",
+	"candle_close_ts",
 	"decision_ts",
+	"target_ts",
 	*FEATURE_COLUMNS,
 	*TARGET_COLUMNS,
 ]
@@ -28,7 +32,7 @@ def _require_columns(
 
 
 def _validate_ohlcv(ohlcv: pd.DataFrame) -> None:
-	_require_columns(ohlcv, ["asset_id", "candle_open_ts"], "OHLCV")
+	_require_columns(ohlcv, ["asset_id", "candle_open_ts", "candle_close_ts"], "OHLCV")
 	expected_index = pd.Index(
 		ohlcv["candle_open_ts"].tolist(),
 		name=ohlcv["candle_open_ts"].name,
@@ -44,6 +48,12 @@ def _validate_ohlcv(ohlcv: pd.DataFrame) -> None:
 
 	if not ohlcv["candle_open_ts"].is_monotonic_increasing:
 		raise ValueError("OHLCV timestamps must be sorted in ascending order")
+
+	if not (
+		 ohlcv["candle_close_ts"]
+		 == ohlcv["candle_open_ts"] + pd.Timedelta(minutes=EXPECTED_TIMEFRAME_MINUTES)
+	).all():
+		raise ValueError("candle_close_ts must equal candle_open_ts plus 5 minutes")
 
 
 def _validate_index(
@@ -86,7 +96,10 @@ def build_dataset(
 	result = pd.DataFrame(
 		{
 			"asset_id": ohlcv["asset_id"].copy(),
-			"decision_ts": ohlcv["candle_open_ts"].copy(),
+			"candle_open_ts": ohlcv["candle_open_ts"].copy(),
+			"candle_close_ts": ohlcv["candle_close_ts"].copy(),
+			"decision_ts": ohlcv["candle_close_ts"].copy(),
+			"target_ts": ohlcv["candle_close_ts"].copy() + pd.Timedelta(hours=1),
 		},
 		index=expected_index,
 	)
@@ -105,7 +118,10 @@ def build_dataset(
 		return pd.DataFrame(
 			{
 				"asset_id": pd.Series(dtype="object"),
+				"candle_open_ts": pd.Series(dtype=ohlcv["candle_open_ts"].dtype),
+				"candle_close_ts": pd.Series(dtype=ohlcv["candle_close_ts"].dtype),
 				"decision_ts": pd.Series(dtype=ohlcv["candle_open_ts"].dtype),
+				"target_ts": pd.Series(dtype=ohlcv["candle_close_ts"].dtype),
 				**{
 					column: pd.Series(dtype="float64")
 					for column in FEATURE_COLUMNS + ["future_return_1h"]

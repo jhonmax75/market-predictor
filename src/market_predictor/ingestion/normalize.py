@@ -4,7 +4,11 @@ from typing import Any
 
 import pandas as pd
 
-from market_predictor.dataset.schema import DEFAULT_ASSET_ID, CANONICAL_OHLCV_COLUMNS
+from market_predictor.dataset.schema import (
+    DEFAULT_ASSET_ID,
+    EXPECTED_TIMEFRAME_MINUTES,
+    CANONICAL_OHLCV_COLUMNS,
+)
 
 
 def normalize_ohlcv(
@@ -26,6 +30,7 @@ def normalize_ohlcv(
         normalized = pd.DataFrame(columns=CANONICAL_OHLCV_COLUMNS)
         normalized["asset_id"] = pd.Series(dtype="object")
         normalized["candle_open_ts"] = pd.Series(dtype="datetime64[ns, UTC]")
+        normalized["candle_close_ts"] = pd.Series(dtype="datetime64[ns, UTC]")
         for column in ["open", "high", "low", "close", "volume"]:
             normalized[column] = pd.Series(dtype="float64")
         return normalized
@@ -43,6 +48,9 @@ def normalize_ohlcv(
         utc=True,
         errors="raise",
     )
+    normalized["candle_close_ts"] = normalized["candle_open_ts"] + pd.Timedelta(
+        minutes=EXPECTED_TIMEFRAME_MINUTES
+    )
 
     for column in ["open", "high", "low", "close", "volume"]:
         if column not in normalized.columns:
@@ -53,6 +61,7 @@ def normalize_ohlcv(
     normalized = normalized[[
         "asset_id",
         "candle_open_ts",
+        "candle_close_ts",
         "open",
         "high",
         "low",
